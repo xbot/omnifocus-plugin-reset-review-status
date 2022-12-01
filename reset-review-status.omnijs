@@ -3,7 +3,7 @@
     "targets": ["omnifocus"],
     "author": "Donie",
     "identifier": "org.0x3f.reset_review_status",
-    "version": "1.0",
+    "version": "2.0",
     "description": "Reset review status of all projects.",
     "label": "Review again",
     "shortLabel": "Review again",
@@ -11,28 +11,31 @@
     "image": "cup.and.saucer"
 }*/
 (() => {
-    const FIELD_FOLDERS = "Folders";
+    const preferences = new Preferences();
 
-    const MENU_ALL = "all";
+    const devPlugin = PlugIn.find('org.0x3f.libdev');
 
-    const PREF_LAST_SELECTED_FOLDERS = "lastSelectedFolders";
+    if (devPlugin === null) {
+        throw new Error('Dev library plugin not installed.');
+    }
 
-    let preferences = new Preferences();
+    const libdev = devPlugin.library('libdev');
+
+    const FIELD_FOLDERS = 'Folders';
+
+    const MENU_ALL = 'all';
+
+    const PREF_LAST_SELECTED_FOLDERS = 'lastSelectedFolders';
 
     var action = new PlugIn.Action(function (selection, sender) {
         try {
-            let menuItems = [];
-            let menuKeys = [];
-
-            menuItems.push("All");
-            menuKeys.push(MENU_ALL);
-
-            menuItems = menuItems.concat(
+            const folderIds   = [MENU_ALL].concat(flattenedFolders.map(folder => folder.id.primaryKey));
+            const folderNames = ['All'].concat(
                 flattenedFolders.map((folder) => {
                     let label = folder.name;
 
                     while (folder.parent !== null) {
-                        label = folder.parent.name + " > " + label;
+                        label = folder.parent.name + ' > ' + label;
                         folder = folder.parent;
                     }
 
@@ -40,36 +43,26 @@
                 })
             );
 
-            menuKeys = menuKeys.concat(
-                flattenedFolders.map((folder) => {
-                    return folder.id.primaryKey;
-                })
-            );
+            const lastSelectedFolderIds = libdev.getJson(preferences, PREF_LAST_SELECTED_FOLDERS, []);
 
-            let lastSelectedFolderIds = preferences.readString(
-                PREF_LAST_SELECTED_FOLDERS
-            );
-
-            let foldersMenu = new Form.Field.MultipleOptions(
+            const foldersMenu = new Form.Field.MultipleOptions(
                 FIELD_FOLDERS,
-                "Folders",
-                menuKeys,
-                menuItems,
-                lastSelectedFolderIds !== null ? lastSelectedFolderIds.split(",") : []
+                'Folders',
+                folderIds,
+                folderNames,
+                lastSelectedFolderIds
             );
 
-            let form = new Form();
+            const form = new Form();
+
             form.addField(foldersMenu);
 
-            let formTitle = "Choose folders to review";
-            let buttonLabel = "Apply";
-
-            let formPromise = form.show(formTitle, buttonLabel);
-
             form.validate = function (formObject) {
-                let selectedFolderIds = formObject.values[FIELD_FOLDERS];
+                const selectedFolderIds = formObject.values[FIELD_FOLDERS];
                 return selectedFolderIds.length > 0;
             };
+
+            const formPromise = form.show('Choose folders to review', 'Apply');
 
             formPromise.then((formObject) => {
                 let selectedFolderIds = formObject.values[FIELD_FOLDERS];
@@ -89,15 +82,20 @@
                     });
                 });
 
-                URL.fromString("omnifocus:///review").open();
+                URL.fromString('omnifocus:///review').open();
 
-                preferences.write(
-                    PREF_LAST_SELECTED_FOLDERS,
-                    selectedFolderIds.join(",")
-                );
+                libdev.setJson(PREF_LAST_SELECTED_FOLDERS, selectedFolderIds);
             });
         } catch (err) {
-            new Alert(err.name, err.message).show();
+            // Migration code, will be removed in the near future.
+            if (err.name === 'SyntaxError' && err.message.startsWith('JSON Parse error: Unexpected identifier')) {
+                const lastSelectedFolders = libdev.getString(preferences, PREF_LAST_SELECTED_FOLDERS).split(',');
+                preferences.write(PREF_LAST_SELECTED_FOLDERS, JSON.stringify(lastSelectedFolders));
+
+                new Alert('Congratulations', 'The configurations have been upgraded to the new version, try again.').show();
+            } else {
+                new Alert(err.name, err.message).show();
+            }
         }
     });
 
